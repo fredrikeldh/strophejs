@@ -10,10 +10,10 @@
 	DOMParser, Strophe, $build */
 
 /** Class: Strophe.Chromesocket
- *  _Private_ helper class that handles chrome-socket Connections
+ *  _Private_ helper class that handles chrome.sockets.tcp Connections
  *
  *  The Strophe.Chromesocket class is used internally by Strophe.Connection
- *  to encapsulate chrome-socket sessions. It is not meant to be used from user's code.
+ *  to encapsulate chrome.sockets.tcp sessions. It is not meant to be used from user's code.
  */
 
 /** File: chromesocket.js
@@ -162,13 +162,14 @@ Strophe.Chromesocket.prototype = {
 		this.socket.onmessage = this._connect_cb_wrapper.bind(this);*/
 		var self = this;
 
-		chrome.socket.create('tcp', {}, function(createInfo)
+		chrome.sockets.tcp.create({}, function(createInfo)
 		{
 			self.socketId = createInfo.socketId;
 			var hostname = self._conn.service.substr(6);
 			console.log("hostname: "+hostname);
 			var port = 5222;	// XMPP standard
-			chrome.socket.connect(
+			console.log("port: "+port);
+			chrome.sockets.tcp.connect(
 				self.socketId,
 				hostname,
 				port,
@@ -176,7 +177,10 @@ Strophe.Chromesocket.prototype = {
 				{
 					console.log("connect result: "+resultCode);
 					self._onOpen();
-					self._doRead();
+					self._receiveFunction = self._connect_cb_wrapper;
+					//console.log("listener: "+self._onReceive);
+					chrome.sockets.tcp.onReceive.addListener(self._onReceive.bind(self));
+					chrome.sockets.tcp.onReceiveError.addListener(self._onReceiveError.bind(self));
 				}
 			)
 		});
@@ -198,34 +202,31 @@ Strophe.Chromesocket.prototype = {
 
 	_write: function(string) {
 		console.log("write "+string.length);
-		console.log(string);
-		chrome.socket.write(this.socketId, this._stringToBuffer(string));
+		//console.log(string);
+		chrome.sockets.tcp.send(this.socketId, this._stringToBuffer(string), function(sendInfo) {
+			console.log("sendInfo: "+sendInfo.resultCode+" "+sendInfo.bytesSent);
+		});
 	},
 
-	_doRead: function() {
-		// Regarding chrome.socket.read:
-		// Documentation indicates bufferSize parameter is "optional", but doesn't say which values do what.
-		// Android source code shows that any value <= 0 causes all available data to be returned.
-		// In any case, unless the connection is broken, at least one byte is always returned.
-		var self = this;
+	_onReceive: function(readInfo) {
+		console.log("_onReceive "+readInfo.data.byteLength);
+		// Interpret ArrayBuffer as UTF-8 string and convert to JavaScript string, wrapped in a MessageEvent.
+		var string = this._bufferToString(readInfo.data);
+		//console.log(string);
+		this._receiveFunction({data:string});
+	},
 
-		chrome.socket.read(self.socketId, 1024, function(readInfo) {
-			console.log("read "+readInfo.resultCode);
-			if(readInfo.resultCode == 0) {
-				// assume code 0 means "connection closed by remote peer"
-				self._onClose();
-				return;
-			}
-			if(readInfo.resultCode < 0) {
-				self._onError(readInfo.resultCode);
-				return;
-			}
-			// Interpret ArrayBuffer as UTF-8 string and convert to JavaScript string, wrapped in a MessageEvent.
-			self._connect_cb_wrapper({data:self._bufferToString(readInfo.data)});
-
-			// Read more data.
-			self._doRead();
-		});
+	_onReceiveError: function(errorInfo) {
+		console.log("_onReceiveError "+errorInfo.resultCode);
+		/*if(readInfo.resultCode == 0) {
+			// assume code 0 means "connection closed by remote peer"
+			self._onClose();
+			return;
+		}*/
+		if(errorInfo.resultCode < 0) {
+			self._onError(errorInfo.resultCode);
+			return;
+		}
 	},
 
 	/** PrivateFunction: _connect_cb
@@ -323,7 +324,7 @@ Strophe.Chromesocket.prototype = {
 		} else {
 			var string = this._streamWrap(message.data);
 			var elem = new DOMParser().parseFromString(string, "text/xml").documentElement;
-			this.socket.onmessage = this._onMessage.bind(this);
+			this._receiveFunction = this._onMessage.bind(this);
 			this._conn._connect_cb(elem, null, message.data);
 		}
 	},
@@ -384,7 +385,7 @@ Strophe.Chromesocket.prototype = {
 	_closeSocket: function ()
 	{
 		if (this.socketId) { try {
-			chrome.socket.destroy(this.socketId);
+			chrome.sockets.tcp.close(this.socketId);
 		} catch (e) { console.log(e); } }
 		this.socketId = null;
 	},
