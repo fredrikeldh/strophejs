@@ -12,6 +12,7 @@
     "message",
     "bosh",
     "websocket",
+    "chromesocket",
     "browser"
   ],
   "author": "Jack Moffit (metajack)",
