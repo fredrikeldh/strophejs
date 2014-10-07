@@ -282,7 +282,8 @@ Strophe = {
         CONNECTED: 5,
         DISCONNECTED: 6,
         DISCONNECTING: 7,
-        ATTACHED: 8
+        ATTACHED: 8,
+        STARTTLS: 9
     },
 
     /** Constants: Log Level Constants
@@ -2415,6 +2416,10 @@ Strophe.Connection.prototype = {
 
         var conncheck = this._proto._connect_cb(bodyWrap);
         if (conncheck === Strophe.Status.CONNFAIL) {
+            return;
+        }
+        // In this case, _connect_cb will be called again once encryption is active.
+        if (conncheck === Strophe.Status.STARTTLS) {
             return;
         }
 

@@ -224,23 +224,53 @@ Strophe.Chromesocket.prototype = {
 			return;
 		}*/
 		if(errorInfo.resultCode < 0) {
-			self._onError(errorInfo.resultCode);
+			this._onError(errorInfo.resultCode);
 			return;
 		}
 	},
+
+	_wrote_starttls: false,
+	_finished_starttls: false,
 
 	/** PrivateFunction: _connect_cb
 	 *  _Private_ function called by Strophe.Connection._connect_cb
 	 *
 	 * checks for stream:error
+	 * performs starttls, if needed.
 	 *
 	 *  Parameters:
 	 *	(Strophe.Request) bodyWrap - The received stanza.
 	 */
 	_connect_cb: function(bodyWrap) {
+		if(this._finished_starttls) {
+			return;
+		}
+
 		var error = this._check_streamerror(bodyWrap, Strophe.Status.CONNFAIL);
 		if (error) {
 			return Strophe.Status.CONNFAIL;
+		}
+
+		// Check for the starttls tag
+		var hasStarttls = bodyWrap.getElementsByTagName("starttls").length > 0;
+		if(hasStarttls && !this._wrote_starttls) {
+			this._write("<starttls xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>");
+			console.log("wrote <starttls>");
+			this._wrote_starttls = true;
+			return Strophe.Status.STARTTLS;
+		}
+
+		// Check for the proceed tag
+		var hasProceed = bodyWrap.getElementsByTagName("proceed").length > 0;
+		if(hasProceed) {
+			console.log("calling secure...");
+			var self = this;
+			chrome.sockets.tcp.secure(this.socketId, {tlsVersion:{min:'tls1.2'}}, function(result) {
+				console.log("secure result: "+result);
+				self._finished_starttls = true;
+				self._conn._connect_cb(bodyWrap);
+			});
+			return Strophe.Status.STARTTLS;
 		}
 	},
 
