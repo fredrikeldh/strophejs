@@ -47,7 +47,6 @@ Strophe.Chromesocket = function(connection) {
 	this.strip = "stream:stream";
 
 	var service = connection.service;
-	// TODO: add TLS support.
 	if (service.indexOf("tcp:") !== 0) {
 		// If the service is not an absolute URL, assume it is a path and put the absolute
 		// URL together from options, current URL and the path.
@@ -162,6 +161,10 @@ Strophe.Chromesocket.prototype = {
 		this.socket.onmessage = this._connect_cb_wrapper.bind(this);*/
 		var self = this;
 
+		this._wrote_starttls = false;
+		this._finished_starttls = false;
+		this._started_starttls = false;
+
 		chrome.sockets.tcp.create({}, function(createInfo)
 		{
 			self.socketId = createInfo.socketId;
@@ -202,7 +205,7 @@ Strophe.Chromesocket.prototype = {
 
 	_write: function(string) {
 		console.log("write "+string.length);
-		//console.log(string);
+		console.log(string);
 		chrome.sockets.tcp.send(this.socketId, this._stringToBuffer(string), function(sendInfo) {
 			console.log("sendInfo: "+sendInfo.resultCode+" "+sendInfo.bytesSent);
 		});
@@ -212,7 +215,7 @@ Strophe.Chromesocket.prototype = {
 		console.log("_onReceive "+readInfo.data.byteLength);
 		// Interpret ArrayBuffer as UTF-8 string and convert to JavaScript string, wrapped in a MessageEvent.
 		var string = this._bufferToString(readInfo.data);
-		//console.log(string);
+		console.log(string);
 		this._receiveFunction({data:string});
 	},
 
@@ -231,6 +234,33 @@ Strophe.Chromesocket.prototype = {
 
 	_wrote_starttls: false,
 	_finished_starttls: false,
+	_started_starttls: false,
+
+	_doProceed: function() {
+		console.log("calling secure...");
+		var self = this;
+		this._started_starttls = true;
+		chrome.sockets.tcp.secure(this.socketId, {tlsVersion:{min:'tls1.2'}}, function(result) {
+			console.log("secure result: "+result);
+
+//5.1.10. If the TLS negotiation is successful, the initiating entity MUST
+//        discard any knowledge obtained in an insecure manner from the
+//        receiving entity before TLS takes effect.
+
+			//self._conn._connect_cb(self._starttls_body);
+
+			// at this point, we need to resend the initial stream.
+//5.2.7. If the TLS negotiation is
+//       successful, the initiating entity MUST initiate a new stream by
+//       sending an opening XML stream header to the receiving entity.
+
+			self._write("<stream:stream to='"+self._conn.domain+
+				"' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'>");
+			self._receiveFunction = self._connect_cb_wrapper;
+
+			self._finished_starttls = true;
+		});
+	},
 
 	/** PrivateFunction: _connect_cb
 	 *  _Private_ function called by Strophe.Connection._connect_cb
@@ -242,34 +272,31 @@ Strophe.Chromesocket.prototype = {
 	 *	(Strophe.Request) bodyWrap - The received stanza.
 	 */
 	_connect_cb: function(bodyWrap) {
-		if(this._finished_starttls) {
-			return;
-		}
-
 		var error = this._check_streamerror(bodyWrap, Strophe.Status.CONNFAIL);
 		if (error) {
 			return Strophe.Status.CONNFAIL;
 		}
 
+		if(this._finished_starttls) {
+			return;
+		}
+
 		// Check for the starttls tag
 		var hasStarttls = bodyWrap.getElementsByTagName("starttls").length > 0;
+		console.log("testing starttls...");
 		if(hasStarttls && !this._wrote_starttls) {
 			this._write("<starttls xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>");
 			console.log("wrote <starttls>");
 			this._wrote_starttls = true;
+			this._starttls_body = bodyWrap;
 			return Strophe.Status.STARTTLS;
 		}
 
 		// Check for the proceed tag
-		var hasProceed = bodyWrap.getElementsByTagName("proceed").length > 0;
+		var hasProceed = bodyWrap.getElementsByTagName("proceed").length > 0 || bodyWrap.tagName == "proceed";
+		console.log("testing proceed: "+bodyWrap.tagName);
 		if(hasProceed) {
-			console.log("calling secure...");
-			var self = this;
-			chrome.sockets.tcp.secure(this.socketId, {tlsVersion:{min:'tls1.2'}}, function(result) {
-				console.log("secure result: "+result);
-				self._finished_starttls = true;
-				self._conn._connect_cb(bodyWrap);
-			});
+			this._doProceed();
 			return Strophe.Status.STARTTLS;
 		}
 	},
@@ -283,6 +310,7 @@ Strophe.Chromesocket.prototype = {
 	 *	(Node) message - Stanza containing the stream:stream.
 	 */
 	_handleStreamStart: function(message) {
+		console.log("_handleStreamStart");
 		var error = false;
 		// Check for errors in the stream:stream tag
 		var ns = message.getAttribute("xmlns");
@@ -329,6 +357,8 @@ Strophe.Chromesocket.prototype = {
 				data = "<?xml version='1.0' ?>"+data;
 			//}
 
+			console.log("_connect_cb_wrapper 1");
+
 			//Make the initial stream:stream selfclosing to parse it without a SAX parser.
 			data = message.data.replace(/<stream:stream (.*[^\/])>/, "<stream:stream $1/>");
 
@@ -336,10 +366,13 @@ Strophe.Chromesocket.prototype = {
 			this._conn.xmlInput(streamStart);
 			this._conn.rawInput(message.data);
 
+			console.log("_connect_cb_wrapper 2");
+
 			//_handleStreamSteart will check for XML errors and disconnect on error
 			if (this._handleStreamStart(streamStart)) {
 
 				//_connect_cb will check for stream:error and disconnect on error
+				console.log("calling _connect_cb 1...");
 				this._connect_cb(streamStart);
 
 				// ensure received stream:stream is NOT selfclosing and save it for following messages
@@ -501,7 +534,7 @@ Strophe.Chromesocket.prototype = {
 					}
 					this._conn.xmlOutput(stanza);
 					this._conn.rawOutput(rawStanza);
-					this._write("<?xml version='1.0' ?>"+rawStanza);
+					this._write(rawStanza);
 				}
 			}
 			this._conn._data = [];
@@ -522,6 +555,10 @@ Strophe.Chromesocket.prototype = {
 	 */
 	_onMessage: function(message) {
 		var elem, data;
+		if(this._started_starttls && !this._finished_starttls) {
+			console.log("ignore message...");
+			return;
+		}
 		// check for closing stream
 		if (message.data === "</stream:stream>") {
 			var close = "</stream:stream>";
@@ -530,6 +567,9 @@ Strophe.Chromesocket.prototype = {
 			if (!this._conn.disconnecting) {
 				this._conn._doDisconnect();
 			}
+			return;
+		} else if (message.data.indexOf("<proceed ") >= 0) {
+			this._doProceed();
 			return;
 		} else if (message.data.search("<stream:stream ") === 0) {
 			//Make the initial stream:stream selfclosing to parse it without a SAX parser.

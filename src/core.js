@@ -2218,6 +2218,7 @@ Strophe.Connection.prototype = {
         // notify the user's callback
         if (this.connect_callback) {
             try {
+                console.log("connect_callback("+status+", "+condition+")");
                 this.connect_callback(status, condition);
             } catch (e) {
                 Strophe.error("User connection callback caused an " +
@@ -2469,6 +2470,10 @@ Strophe.Connection.prototype = {
      */
     authenticate: function (matched)
     {
+      console.log("matched auth algos:");
+      for(var i in matched) {
+        console.log(matched[i].prototype.name);
+      }
       var i;
       // Sorting matched mechanisms according to priority.
       for (i = 0; i < matched.length - 1; ++i) {
@@ -2488,7 +2493,10 @@ Strophe.Connection.prototype = {
       // run each mechanism
       var mechanism_found = false;
       for (i = 0; i < matched.length; ++i) {
-        if (!matched[i].test(this)) continue;
+        if (!matched[i].test(this)) {
+          console.log(matched[i].prototype.name+" test failed!");
+          continue;
+        }
 
         this._sasl_success_handler = this._addSysHandler(
           this._sasl_success_cb.bind(this), null,
@@ -2515,6 +2523,7 @@ Strophe.Connection.prototype = {
 
         this.send(request_auth_exchange.tree());
 
+        console.log("mechanism_found!");
         mechanism_found = true;
         break;
       }
@@ -3237,6 +3246,7 @@ Strophe.SASLMD5 = function() {};
 Strophe.SASLMD5.prototype = new Strophe.SASLMechanism("DIGEST-MD5", false, 30);
 
 Strophe.SASLMD5.test = function(connection) {
+  console.log("SASLMD5.test: "+connection.authcid);
   return connection.authcid !== null;
 };
 
