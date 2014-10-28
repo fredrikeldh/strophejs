@@ -360,7 +360,8 @@ Strophe.Chromesocket.prototype = {
 			console.log("_connect_cb_wrapper 1");
 
 			//Make the initial stream:stream selfclosing to parse it without a SAX parser.
-			data = message.data.replace(/<stream:stream (.*[^\/])>/, "<stream:stream $1/>");
+			//remove any data following the stream:stream tag
+			data = message.data.replace(/<stream:stream (.*?[^\/])>.*/, "<stream:stream $1/>");
 
 			var streamStart = new DOMParser().parseFromString(data, "text/xml").documentElement;
 			this._conn.xmlInput(streamStart);
@@ -377,6 +378,14 @@ Strophe.Chromesocket.prototype = {
 
 				// ensure received stream:stream is NOT selfclosing and save it for following messages
 				this.streamStart = message.data.replace(/^<stream:(.*)\/>$/, "<stream:$1>");
+
+				//handle any data following the stream:stream tag.
+				data = message.data.replace(/.*<stream:stream .*?[^\/]>(.*)/, "$1");
+				if (data.length > 0) {
+					console.log('data following stream:stream tag present. calling _connect_cb_wrapper.')
+					this._connect_cb_wrapper({data: data});
+				}
+
 			}
 		} else if (message.data === "</stream:stream>") {
 			this._conn.rawInput(message.data);
@@ -554,7 +563,7 @@ Strophe.Chromesocket.prototype = {
 	 * (string) message - The socket message.
 	 */
 	_onMessage: function(message) {
-		var elem, data;
+		var elem, data, extraData;
 		if(this._started_starttls && !this._finished_starttls) {
 			console.log("ignore message...");
 			return;
@@ -571,14 +580,25 @@ Strophe.Chromesocket.prototype = {
 		} else if (message.data.indexOf("<proceed ") >= 0) {
 			this._doProceed();
 			return;
-		} else if (message.data.search("<stream:stream ") === 0) {
+		} else if (message.data.search("<stream:stream ") != -1) {
 			//Make the initial stream:stream selfclosing to parse it without a SAX parser.
-			data = message.data.replace(/<stream:stream (.*[^\/])>/, "<stream:stream $1/>");
+			//remove any data following the stream:stream tag
+			data = message.data.replace(/<stream:stream (.*?[^\/])>.*/, "<stream:stream $1/>");
 			elem = new DOMParser().parseFromString(data, "text/xml").documentElement;
 
 			if (!this._handleStreamStart(elem)) {
 				return;
 			}
+
+			//handle any data following the stream:stream tag.
+			data = message.data.replace(/.*<stream:stream .*?[^\/]>(.*)/, "$1");
+			if (data.length > 0) {
+				elem = new DOMParser().parseFromString(data, "text/xml").documentElement;
+				extraData = data;
+			}
+
+			// ensure received stream:stream is NOT selfclosing and save it for following messages
+			this.streamStart = message.data.replace(/^<stream:(.*)\/>$/, "<stream:$1>");
 		} else {
 			data = this._streamWrap(message.data);
 			elem = new DOMParser().parseFromString(data, "text/xml").documentElement;
@@ -599,6 +619,11 @@ Strophe.Chromesocket.prototype = {
 			return;
 		}
 		this._conn._dataRecv(elem, message.data);
+
+		if (extraData != null) {
+			console.log('data following stream:stream tag present. calling _onMessage.')
+			this._onMessage({data: extraData});
+		}
 	},
 
 	/** PrivateFunction: _onOpen
