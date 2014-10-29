@@ -182,8 +182,10 @@ Strophe.Chromesocket.prototype = {
 					self._onOpen();
 					self._receiveFunction = self._connect_cb_wrapper;
 					//console.log("listener: "+self._onReceive);
-					chrome.sockets.tcp.onReceive.addListener(self._onReceive.bind(self));
-					chrome.sockets.tcp.onReceiveError.addListener(self._onReceiveError.bind(self));
+					self.onReciever = self._onReceive.bind(self);
+					self.onRecieverError = self._onReceiveError.bind(self);
+					chrome.sockets.tcp.onReceive.addListener(self.onReciever);
+					chrome.sockets.tcp.onReceiveError.addListener(self.onRecieverError);
 				}
 			)
 		});
@@ -212,6 +214,8 @@ Strophe.Chromesocket.prototype = {
 	},
 
 	_onReceive: function(readInfo) {
+		if(readInfo.socketId != this.socketId)
+			return;
 		console.log("_onReceive "+readInfo.data.byteLength);
 		// Interpret ArrayBuffer as UTF-8 string and convert to JavaScript string, wrapped in a MessageEvent.
 		var string = this._bufferToString(readInfo.data);
@@ -220,6 +224,8 @@ Strophe.Chromesocket.prototype = {
 	},
 
 	_onReceiveError: function(errorInfo) {
+		if(readInfo.socketId != this.socketId)
+			return;
 		console.log("_onReceiveError "+errorInfo.resultCode);
 		/*if(readInfo.resultCode == 0) {
 			// assume code 0 means "connection closed by remote peer"
@@ -458,6 +464,8 @@ Strophe.Chromesocket.prototype = {
 	{
 		if (this.socketId) { try {
 			chrome.sockets.tcp.close(this.socketId);
+			chrome.sockets.tcp.onReceive.removeListener(this.onReciever);
+			chrome.sockets.tcp.onReceiveError.removeListener(this.onRecieverError);
 		} catch (e) { console.log(e); } }
 		this.socketId = null;
 	},
