@@ -206,21 +206,98 @@ Strophe.Chromesocket.prototype = {
 	},
 
 	_write: function(string) {
-		console.log("write "+string.length);
-		console.log(string);
+		//console.log("write "+string.length);
+		//console.log(string);
 		chrome.sockets.tcp.send(this.socketId, this._stringToBuffer(string), function(sendInfo) {
-			console.log("sendInfo: "+sendInfo.resultCode+" "+sendInfo.bytesSent);
+			//console.log("sendInfo: "+sendInfo.resultCode+" "+sendInfo.bytesSent);
 		});
+	},
+
+	_receiveBuffer: false,
+
+	// returns the length of the valid xml in the string.
+	// returns false if the string is not (yet) valid xml.
+	_stringIsValidXml: function(string) {
+		var startIndex = 0;
+		var endOfStartTag;
+		var startTag;
+		while(true) {
+			startIndex = string.indexOf('<', startIndex);
+			if(startIndex < 0) {
+				console.log("no startIndex");
+				return false;
+			}
+			// skip XML declarations.
+			console.log(string.charAt(startIndex+1));
+			if(string.charAt(startIndex+1) == '?') {
+				startIndex = startIndex+1;
+			} else {
+				endOfStartTag = string.indexOf('>', startIndex);
+				if(endOfStartTag <= 0) {
+					console.log("no end of start tag");
+					return false;
+				}
+				if(string.charAt(endOfStartTag-1) == '/') {
+					// empty tag
+					console.log("empty tag");
+					return endOfStartTag+1;
+				}
+				var spaceIndex = string.indexOf(' ', startIndex);
+				if(spaceIndex > 0 && spaceIndex < endOfStartTag) {
+					endOfStartTag = spaceIndex;
+				}
+				startTag = string.substring(startIndex+1, endOfStartTag);
+				if(startTag == 'stream:stream') {
+					startIndex = endOfStartTag;
+					continue;
+				}
+				break;
+			}
+		}
+		var endTag = '</'+startTag+'>';
+		var endIndex = string.indexOf(endTag);
+		if(endIndex > 0) {
+			return endIndex + endTag.length;
+		} else {
+			console.log("not valid xml; looking for \""+endTag+"\"");
+			return false;
+		}
 	},
 
 	_onReceive: function(readInfo) {
 		if(readInfo.socketId != this.socketId)
 			return;
-		console.log("_onReceive "+readInfo.data.byteLength);
+		//console.log("_onReceive "+readInfo.data.byteLength);
 		// Interpret ArrayBuffer as UTF-8 string and convert to JavaScript string, wrapped in a MessageEvent.
 		var string = this._bufferToString(readInfo.data);
-		console.log(string);
-		this._receiveFunction({data:string});
+		console.log("_onReceive: "+string);
+
+		// Make sure we send only complete XML documents.
+		// Save the string of incomplete documents.
+		// Abort app on error.
+		if(!this._receiveBuffer) {
+			this._receiveBuffer = string;
+		} else {
+			this._receiveBuffer += string;
+		}
+		while(this._receiveBuffer) {
+			string = this._receiveBuffer;
+			var length = this._stringIsValidXml(string);
+			if(length) {
+				if(string.length == length) {
+					this._receiveBuffer = false;
+				} else {
+					// If the xml ended before the string did,
+					// assume the rest is a new xml document. Save it for later.
+					this._receiveBuffer = string.substring(length);
+					string = string.substr(0, length);
+				}
+				console.log("_receiveFunction: "+string);
+				this._receiveFunction({data:string});
+			} else {
+				break;
+			}
+		}
 	},
 
 	_onReceiveError: function(errorInfo) {
@@ -288,8 +365,8 @@ Strophe.Chromesocket.prototype = {
 		}
 
 		// Check for the starttls tag
-		var hasStarttls = bodyWrap.getElementsByTagName("starttls").length > 0;
-		console.log("testing starttls...");
+		var hasStarttls = false;//bodyWrap.getElementsByTagName("starttls").length > 0;
+		//console.log("testing starttls...");
 		if(hasStarttls && !this._wrote_starttls) {
 			this._write("<starttls xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>");
 			console.log("wrote <starttls>");
@@ -300,7 +377,7 @@ Strophe.Chromesocket.prototype = {
 
 		// Check for the proceed tag
 		var hasProceed = bodyWrap.getElementsByTagName("proceed").length > 0 || bodyWrap.tagName == "proceed";
-		console.log("testing proceed: "+bodyWrap.tagName);
+		//console.log("testing proceed: "+bodyWrap.tagName);
 		if(hasProceed) {
 			this._doProceed();
 			return Strophe.Status.STARTTLS;
@@ -316,7 +393,7 @@ Strophe.Chromesocket.prototype = {
 	 *	(Node) message - Stanza containing the stream:stream.
 	 */
 	_handleStreamStart: function(message) {
-		console.log("_handleStreamStart");
+		//console.log("_handleStreamStart");
 		var error = false;
 		// Check for errors in the stream:stream tag
 		var ns = message.getAttribute("xmlns");
@@ -363,7 +440,7 @@ Strophe.Chromesocket.prototype = {
 				data = "<?xml version='1.0' ?>"+data;
 			//}
 
-			console.log("_connect_cb_wrapper 1");
+			//console.log("_connect_cb_wrapper 1");
 
 			//Make the initial stream:stream selfclosing to parse it without a SAX parser.
 			//remove any data following the stream:stream tag
@@ -373,13 +450,13 @@ Strophe.Chromesocket.prototype = {
 			this._conn.xmlInput(streamStart);
 			this._conn.rawInput(message.data);
 
-			console.log("_connect_cb_wrapper 2");
+			//console.log("_connect_cb_wrapper 2");
 
 			//_handleStreamSteart will check for XML errors and disconnect on error
 			if (this._handleStreamStart(streamStart)) {
 
 				//_connect_cb will check for stream:error and disconnect on error
-				console.log("calling _connect_cb 1...");
+				//console.log("calling _connect_cb 1...");
 				this._connect_cb(streamStart);
 
 				// ensure received stream:stream is NOT selfclosing and save it for following messages
@@ -417,6 +494,7 @@ Strophe.Chromesocket.prototype = {
 	 */
 	_disconnect: function (pres)
 	{
+		console.log("ChromeSocket._disconnect("+pres+") called");
 		if (this.socketId) {
 			if (pres) {
 				this._conn.send(pres);
@@ -463,9 +541,11 @@ Strophe.Chromesocket.prototype = {
 	_closeSocket: function ()
 	{
 		if (this.socketId) { try {
+			console.log("closing socket...");
 			chrome.sockets.tcp.close(this.socketId);
 			chrome.sockets.tcp.onReceive.removeListener(this.onReciever);
 			chrome.sockets.tcp.onReceiveError.removeListener(this.onRecieverError);
+			console.log("socket listeners removed.");
 		} catch (e) { console.log(e); } }
 		this.socketId = null;
 	},
@@ -629,7 +709,7 @@ Strophe.Chromesocket.prototype = {
 		this._conn._dataRecv(elem, message.data);
 
 		if (extraData != null) {
-			console.log('data following stream:stream tag present. calling _onMessage.')
+			//console.log('data following stream:stream tag present. calling _onMessage.')
 			this._onMessage({data: extraData});
 		}
 	},
