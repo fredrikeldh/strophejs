@@ -22,9 +22,27 @@ module.exports = function(grunt){
             "js": ["<%= concat.dist.dest %>", "strophe.min.js"]
         },
 
+        qunit: {
+            all: {
+                options: {
+                    urls: [
+                        'http://localhost:8000/tests/strophe.html',
+                    ]
+                }
+            }
+        },
+        connect: {
+            server: {
+                options: {
+                    port: 8000,
+                    base: '.'
+                }
+            }
+        },
+
         concat: {
             dist: {
-                src: ['src/base64.js', "src/sha1.js", "src/md5.js", "src/core.js", "src/bosh.js", "src/websocket.js", "src/chromesocket.js"  ],
+                src: ['src/wrap_header.js', 'src/base64.js', 'src/sha1.js', 'src/md5.js', 'src/polyfills.js', 'src/core.js', 'src/bosh.js', 'src/websocket.js', 'src/wrap_footer.js', 'src/chromesocket.js'],
                 dest: '<%= pkg.name %>'
             },
             options: {
@@ -103,6 +121,7 @@ module.exports = function(grunt){
     });
 
     grunt.loadNpmTasks('grunt-contrib-copy');
+    grunt.loadNpmTasks('grunt-contrib-connect');
     grunt.loadNpmTasks("grunt-contrib-uglify");
     grunt.loadNpmTasks('grunt-contrib-jshint');
     grunt.loadNpmTasks('grunt-contrib-watch');
@@ -111,6 +130,7 @@ module.exports = function(grunt){
     grunt.loadNpmTasks('grunt-shell');
     grunt.loadNpmTasks('grunt-natural-docs');
     grunt.loadNpmTasks('grunt-mkdir');
+    grunt.loadNpmTasks('grunt-contrib-qunit');
 
     grunt.registerTask("default", ["jshint", "min"]);
     grunt.registerTask("min", ["concat", "uglify"]);
@@ -118,5 +138,21 @@ module.exports = function(grunt){
     grunt.registerTask("doc", ["concat", "copy:prepare-doc", "mkdir:prepare-doc", "natural_docs"]);
     grunt.registerTask("release", ["default", "doc", "copy:prepare-release", "shell:tar", "shell:zip"]);
     grunt.registerTask("all", ["release", "clean"]);
+    grunt.registerTask("test", ["connect", "qunit"]);
 
+    grunt.registerTask('almond', 'Create an almond build with r.js', function () {
+        var done = this.async();
+        require('child_process').exec(
+                './node_modules/requirejs/bin/r.js -o build.js optimize=none out=strophe.almond.js',
+            function (err, stdout, stderr) {
+                if (err) {
+                    grunt.log.write('build failed with error code '+err.code);
+                    grunt.log.write(stderr);
+                }
+                grunt.log.write(stdout);
+                done();
+            }
+        );
+        grunt.task.run('uglify');
+    });
 };

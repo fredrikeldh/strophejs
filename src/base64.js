@@ -2,7 +2,16 @@
 // public domain.  It would be nice if you left this header intact.
 // Base64 code from Tyler Akins -- http://rumkin.com
 
-var Base64 = (function () {
+(function (root, factory) {
+    if (typeof define === 'function' && define.amd) {
+        define('strophe-base64', function () {
+            return factory();
+        });
+    } else {
+        // Browser globals
+        root.Base64 = factory();
+    }
+}(this, function () {
     var keyStr = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
     var obj = {
@@ -27,6 +36,7 @@ var Base64 = (function () {
                 enc4 = chr3 & 63;
 
                 if (isNaN(chr2)) {
+                    enc2 = ((chr1 & 3) << 4);
                     enc3 = enc4 = 64;
                 } else if (isNaN(chr3)) {
                     enc4 = 64;
@@ -75,6 +85,5 @@ var Base64 = (function () {
             return output;
         }
     };
-
     return obj;
-})();
+}));
